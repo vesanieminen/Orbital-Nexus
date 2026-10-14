@@ -1,0 +1,9 @@
+# scratch screenshots from testing (curated ones live in assets/)
+/*.png
+/crop_*.png
+
+# tooling / caches
+.playwright-cli/
+npmcache/
+vendor-tmp/
+node_modules/

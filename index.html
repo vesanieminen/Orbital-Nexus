@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+  <title>ORBITAL NEXUS — Deep Space Traffic Simulation</title>
+<style>
+  :root {
+    --accent: #4fd8ff;
+    --amber: #ffb45e;
+    --panel: rgba(8, 14, 22, 0.62);
+    --panel-border: rgba(90, 160, 210, 0.22);
+    --text: #cfe3f2;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--text); }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; transition: opacity 0.9s ease; }
+  #hud.hidden { opacity: 0; }
+
+  #titlebox { position: absolute; top: 18px; left: 22px; user-select: none; }
+  #titlebox h1 {
+    font-size: 15px; font-weight: 600; letter-spacing: 0.42em; color: #e8f4ff;
+    text-shadow: 0 0 14px rgba(80, 190, 255, 0.55);
+  }
+  #titlebox .sub {
+    margin-top: 4px; font-size: 10px; letter-spacing: 0.28em; color: rgba(160, 200, 230, 0.55);
+    text-transform: uppercase;
+  }
+  #stats {
+    position: absolute; top: 18px; right: 22px; text-align: right; font-size: 11px;
+    letter-spacing: 0.08em; color: rgba(170, 205, 235, 0.75); user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+  #stats .fps { color: var(--accent); }
+
+  #controls {
+    position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 10px; padding: 10px 16px; pointer-events: auto;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 6px 30px rgba(0,0,0,0.5);
+  }
+  .ctl-group { display: flex; align-items: center; gap: 8px; }
+  .ctl-sep { width: 1px; height: 26px; background: var(--panel-border); }
+  button {
+    font-family: inherit; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text); background: rgba(40, 70, 100, 0.35);
+    border: 1px solid var(--panel-border); border-radius: 6px;
+    padding: 7px 11px; cursor: pointer; transition: all 0.18s ease;
+  }
+  button:hover { background: rgba(70, 130, 180, 0.45); border-color: rgba(120, 200, 255, 0.5); }
+  button.active { background: rgba(60, 160, 220, 0.4); border-color: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(79,216,255,0.25); }
+  label.mini { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(160, 200, 230, 0.6); }
+  input[type=range] {
+    -webkit-appearance: none; width: 92px; height: 3px; border-radius: 2px;
+    background: rgba(120, 180, 220, 0.3); outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px rgba(79,216,255,0.7);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 12px; height: 12px; border: none; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px rgba(79,216,255,0.7);
+  }
+  .val { font-size: 11px; min-width: 34px; text-align: center; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+  #resumeBtn {
+    position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%);
+    pointer-events: auto; display: none;
+    border-color: rgba(180, 130, 255, 0.55); color: #e2d4ff;
+    background: rgba(70, 40, 120, 0.45);
+  }
+  #resumeBtn:hover { box-shadow: 0 0 14px rgba(170,120,255,0.4); }
+  #resumeBtn.show { display: block; }
+
+  #infopanel {
+    position: absolute; right: 22px; bottom: 22px; width: 262px;
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px;
+    padding: 14px 16px; pointer-events: auto; backdrop-filter: blur(10px);
+    display: none; box-shadow: 0 6px 30px rgba(0,0,0,0.5);
+  }
+  #infopanel.show { display: block; }
+  #infopanel .shipname { font-size: 14px; font-weight: 600; color: #fff; letter-spacing: 0.06em; }
+  #infopanel .shipclass { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent); margin-top: 3px; }
+  #infopanel .row { display: flex; justify-content: space-between; font-size: 11px; margin-top: 7px; }
+  #infopanel .row .k { color: rgba(160, 200, 230, 0.6); letter-spacing: 0.08em; }
+  #infopanel .row .v { color: #e6f2fb; text-align: right; max-width: 150px; }
+  #infopanel .close { position: absolute; top: 8px; right: 10px; padding: 2px 7px; font-size: 12px; background: none; border: none; color: rgba(160,200,230,0.6); }
+  #infopanel .close:hover { color: #fff; background: none; }
+  #infopanel .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+
+  #hint {
+    position: absolute; left: 22px; bottom: 22px; font-size: 10px; letter-spacing: 0.14em;
+    color: rgba(150, 190, 220, 0.5); text-transform: uppercase; user-select: none;
+    transition: opacity 1.2s ease;
+  }
+
+  #loading {
+    position: fixed; inset: 0; background: #03060c; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 50; transition: opacity 1s ease;
+  }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading .l1 { font-size: 16px; letter-spacing: 0.5em; color: #cfe9ff; text-shadow: 0 0 18px rgba(80,190,255,0.6); }
+  #loading .l2 { margin-top: 14px; font-size: 10px; letter-spacing: 0.3em; color: rgba(140,180,215,0.5); text-transform: uppercase; }
+  #loading .bar { margin-top: 22px; width: 220px; height: 2px; background: rgba(90,160,210,0.2); border-radius: 2px; overflow: hidden; }
+  #loading .bar i { display: block; height: 100%; width: 30%; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: sweep 1.1s ease-in-out infinite; }
+  @keyframes sweep { 0% { transform: translateX(-100%);} 100% { transform: translateX(340%);} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud">
+  <div id="titlebox">
+    <h1>ORBITAL NEXUS</h1>
+    <div class="sub">Kepler Station &middot; Orbital Traffic Control</div>
+  </div>
+  <div id="stats">
+    <div><span class="fps" id="fps">--</span> fps</div>
+    <div id="shipcount">-- vessels</div>
+    <div id="simtime">T+ 00:00</div>
+  </div>
+
+  <button id="resumeBtn">&#9654; Resume cinematic from here</button>
+
+  <div id="controls">
+    <div class="ctl-group">
+      <button id="pauseBtn" title="Space">&#10074;&#10074; Pause</button>
+    </div>
+    <div class="ctl-sep"></div>
+    <div class="ctl-group">
+      <label class="mini">Speed</label>
+      <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1">
+      <span class="val" id="speedVal">1.0&times;</span>
+    </div>
+    <div class="ctl-sep"></div>
+    <div class="ctl-group">
+      <label class="mini">Traffic</label>
+      <input type="range" id="density" min="20" max="90" step="5" value="55">
+      <span class="val" id="densityVal">55</span>
+    </div>
+    <div class="ctl-sep"></div>
+    <div class="ctl-group">
+      <button id="modeCine" class="active">Cinematic</button>
+      <button id="modeStation">Station</button>
+      <button id="modeFollow">Follow</button>
+    </div>
+    <div class="ctl-sep"></div>
+    <div class="ctl-group">
+      <button id="routesBtn" title="R">Routes</button>
+      <button id="cineModeBtn" title="H">Cinema&nbsp;mode</button>
+    </div>
+  </div>
+
+  <div id="infopanel">
+    <button class="close" id="infoClose">&times;</button>
+    <div class="shipname" id="iName">—</div>
+    <div class="shipclass" id="iClass">—</div>
+    <div class="row"><span class="k">Destination</span><span class="v" id="iDest">—</span></div>
+    <div class="row"><span class="k">Task</span><span class="v" id="iTask">—</span></div>
+    <div class="row"><span class="k">Velocity</span><span class="v" id="iVel">—</span></div>
+    <div class="row"><span class="k">Range to target</span><span class="v" id="iRange">—</span></div>
+  </div>
+
+  <div id="hint">Drag to orbit &middot; Scroll to zoom &middot; Click a ship to track it &middot; Space pause &middot; C modes &middot; R routes &middot; H cinema</div>
+</div>
+
+<div id="loading">
+  <div class="l1">ORBITAL NEXUS</div>
+  <div class="l2">Initialising orbital simulation</div>
+  <div class="bar"><i></i></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
