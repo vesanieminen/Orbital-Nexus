@@ -76,6 +76,45 @@ const gradePass = new ShaderPass({
 composer.addPass(gradePass);
 composer.addPass(new OutputPass());
 
+// FXAA (compact Lottes 3.11 console variant) as the final pass on the
+// gamma-correct image. The renderer runs with antialias:false because MSAA
+// doesn't survive the composer chain — without this, the planet silhouette
+// and thin hull greebles shimmer while the cinematic camera moves.
+const fxaaPass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uInvRes: { value: new THREE.Vector2(1 / 1920, 1 / 1080) } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform vec2 uInvRes; varying vec2 vUv;
+    void main(){
+      vec2 r = uInvRes;
+      vec3 luma = vec3(0.299, 0.587, 0.114);
+      vec3 rgbNW = texture2D(tDiffuse, vUv + vec2(-1.0,-1.0)*r).rgb;
+      vec3 rgbNE = texture2D(tDiffuse, vUv + vec2( 1.0,-1.0)*r).rgb;
+      vec3 rgbSW = texture2D(tDiffuse, vUv + vec2(-1.0, 1.0)*r).rgb;
+      vec3 rgbSE = texture2D(tDiffuse, vUv + vec2( 1.0, 1.0)*r).rgb;
+      vec3 rgbM  = texture2D(tDiffuse, vUv).rgb;
+      float lNW = dot(rgbNW, luma), lNE = dot(rgbNE, luma);
+      float lSW = dot(rgbSW, luma), lSE = dot(rgbSE, luma), lM = dot(rgbM, luma);
+      float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+      float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+      vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
+      float dirReduce = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);
+      float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+      dir = min(vec2(8.0), max(vec2(-8.0), dir * rcpDirMin)) * r;
+      vec3 rgbA = 0.5 * (
+        texture2D(tDiffuse, vUv + dir * (1.0/3.0 - 0.5)).rgb +
+        texture2D(tDiffuse, vUv + dir * (2.0/3.0 - 0.5)).rgb);
+      vec3 rgbB = rgbA * 0.5 + 0.25 * (
+        texture2D(tDiffuse, vUv + dir * -0.5).rgb +
+        texture2D(tDiffuse, vUv + dir *  0.5).rgb);
+      float lB = dot(rgbB, luma);
+      vec3 col = (lB < lMin || lB > lMax) ? rgbA : rgbB;
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+fxaaPass.setSize = (w, h) => fxaaPass.uniforms.uInvRes.value.set(1 / w, 1 / h);
+composer.addPass(fxaaPass);
+
 // ---------------------------------------------------------------- adaptive quality
 const quality = { particles: true, particleRate: 0.55, trailsFar: false, tier: 2 };
 const tiers = [
@@ -116,6 +155,8 @@ const clock = new THREE.Clock();
 let simTime = 0;
 let fpsEMA = 60;
 let adaptTimer = 0;
+let adaptStrikes = 0;
+let adaptCooldown = 2.5;
 let firstFrame = true;
 
 function frame() {
@@ -124,12 +165,24 @@ function frame() {
   const fps = 1 / Math.max(rawDt, 1e-4);
   fpsEMA = fpsEMA * 0.92 + fps * 0.08;
 
-  // adaptive quality every ~2.5s
+  // adaptive quality: switch tiers only after two consecutive readings on the
+  // same side of a wide dead zone, with exponential backoff after each switch.
+  // A tier switch changes the pixel ratio and reallocates render targets —
+  // oscillating tiers showed up as a visible pulse/flicker on the planet.
   adaptTimer -= rawDt;
   if (adaptTimer <= 0) {
-    adaptTimer = 2.5;
-    if (fpsEMA < 42 && quality.tier > 0) applyTier(quality.tier - 1);
-    else if (fpsEMA > 57 && quality.tier < 2 && fpsEMA < 100) applyTier(quality.tier + 1);
+    const bad = fpsEMA < 40, good = fpsEMA > 62 && fpsEMA < 100;
+    const want = (bad && quality.tier > 0) || (good && quality.tier < 2);
+    adaptStrikes = want ? adaptStrikes + 1 : 0;
+    if (adaptStrikes >= 2) {
+      applyTier(bad ? quality.tier - 1 : quality.tier + 1);
+      adaptStrikes = 0;
+      adaptCooldown = Math.min(adaptCooldown * 2, 40);
+      adaptTimer = adaptCooldown;
+    } else {
+      adaptTimer = 2.5;
+      adaptCooldown = 2.5;
+    }
   }
 
   const dt = state.paused ? 0 : rawDt * state.speed;
