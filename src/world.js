@@ -58,30 +58,56 @@ export class World {
       fragmentShader: NOISE_GLSL + /* glsl */`
         uniform float uTime; uniform vec3 uSunDir;
         varying vec3 vObj; varying vec3 vWN; varying vec3 vWP;
+
+        float hgt(vec3 sp){
+          float h = fbm(sp*3.2 + 11.7);
+          float h2 = fbm(sp*9.0 + 4.1);
+          return h + h2*0.12;
+        }
+        // fade out high-frequency detail once its footprint exceeds a pixel
+        // (kills the single-frame shimmer/aliasing artifacts on the surface)
+        float aaFade(vec3 p, float lo, float hi){
+          vec3 d = fwidth(p);
+          float m = max(max(d.x, d.y), d.z);
+          return 1.0 - smoothstep(lo, hi, m);
+        }
+
         void main(){
           vec3 sp = normalize(vObj);
-          float h  = fbm(sp*3.2 + 11.7);
-          float h2 = fbm(sp*9.0 + 4.1);
-          float land = smoothstep(0.50, 0.545, h + h2*0.12);
+          float h  = hgt(sp);
+          float land = smoothstep(0.50, 0.545, h);
 
           float lat = abs(sp.y);
           float ice = smoothstep(0.72, 0.86, lat + fbm(sp*6.0)*0.08);
 
-          // ocean
+          // ocean with coastal shelf band
           vec3 deep = vec3(0.012, 0.055, 0.13);
           vec3 shallow = vec3(0.03, 0.16, 0.28);
           vec3 ocean = mix(deep, shallow, smoothstep(0.35, 0.52, h));
-          // land
+          float shelf = smoothstep(0.455, 0.505, h) * (1.0 - land);
+          ocean = mix(ocean, vec3(0.07, 0.28, 0.36), shelf * 0.75);
+
+          // land with fine striation detail
           vec3 green = vec3(0.06, 0.14, 0.07);
           vec3 arid  = vec3(0.26, 0.20, 0.11);
           vec3 rock  = vec3(0.16, 0.14, 0.13);
           vec3 landc = mix(green, arid, smoothstep(0.15, 0.5, fbm(sp*5.0+30.0)));
           landc = mix(landc, rock, smoothstep(0.60, 0.72, h));
+          float det = fbm(sp*26.0 + h*6.0);
+          landc = mix(landc, landc*1.35, (det-0.5)*0.9*aaFade(sp*26.0, 0.02, 0.09));
           vec3 surf = mix(ocean, landc, land);
           surf = mix(surf, vec3(0.75,0.78,0.82), ice);
 
-          float sun = dot(vWN, uSunDir);
-          float day = smoothstep(-0.12, 0.30, sun);
+          // terrain relief: perturb the normal from the height gradient over land
+          vec3 t1 = normalize(cross(sp, vec3(0.0, 1.0, 0.001)));
+          vec3 t2 = cross(sp, t1);
+          float e = 0.006;
+          float hu = hgt(normalize(sp + t1*e)), hv = hgt(normalize(sp + t2*e));
+          float mountains = land * smoothstep(0.52, 0.62, h) * aaFade(sp*9.0, 0.02, 0.08);
+          vec3 nrm = normalize(vWN + (t1*(hu-h) + t2*(hv-h)) * (0.22/e) * mountains);
+
+          float sun = dot(nrm, uSunDir);
+          float day = smoothstep(-0.12, 0.30, dot(vWN, uSunDir));
           float diff = max(sun, 0.0);
 
           vec3 col = surf * (0.045 + diff * 1.25);
@@ -92,12 +118,12 @@ export class World {
           float spec = pow(max(dot(vWN,H),0.0), 90.0) * (1.0-land) * day;
           col += vec3(0.9,0.85,0.7) * spec * 0.8;
 
-          // night city lights
+          // night city lights (alias-faded so specks don't pop between frames)
           float pop = fbm(sp*34.0 + 7.0);
           float coast = 1.0 - smoothstep(0.50, 0.62, h);
           float cities = land * (1.0-ice) * pow(smoothstep(0.60, 0.75, pop), 2.0) * (0.35 + 0.65*coast);
           float flick = 0.9 + 0.1*sin(uTime*2.0 + pop*90.0);
-          col += vec3(1.0, 0.62, 0.25) * cities * flick * (1.0-day) * 0.45;
+          col += vec3(1.0, 0.62, 0.25) * cities * flick * (1.0-day) * 0.45 * aaFade(sp*34.0, 0.03, 0.12);
 
           // terminator warm band
           float band = smoothstep(0.0,0.18,sun) * (1.0-smoothstep(0.18,0.45,sun));
@@ -109,6 +135,7 @@ export class World {
     this.planetMat = mat;
     this.planet = new THREE.Mesh(geo, mat);
     this.planet.rotation.z = 0.12;
+    this.planet.renderOrder = 1;
     this.scene.add(this.planet);
 
     // ---- clouds
@@ -124,11 +151,21 @@ export class World {
       fragmentShader: NOISE_GLSL + /* glsl */`
         uniform float uTime; uniform vec3 uSunDir;
         varying vec3 vObj; varying vec3 vWN;
+        float aaFade(vec3 p, float lo, float hi){
+          vec3 d = fwidth(p);
+          float m = max(max(d.x, d.y), d.z);
+          return 1.0 - smoothstep(lo, hi, m);
+        }
         void main(){
           vec3 sp = normalize(vObj);
-          vec3 q = sp*4.5 + vec3(uTime*0.004, uTime*0.0015, 0.0);
-          float c = fbm(q + fbm(q*2.1)*0.6);
-          float a = smoothstep(0.48, 0.72, c);
+          vec3 q = sp*4.2 + vec3(uTime*0.004, uTime*0.0015, uTime*0.0015);
+          // domain-warped weather: swirls and fronts instead of blobs
+          vec3 warp = vec3(fbm(q*1.9 + 5.0), fbm(q*1.9 + 9.0), fbm(q*1.9 + 17.0));
+          float c = fbm(q + warp*0.85);
+          float a = smoothstep(0.44, 0.70, c);
+          // wispy high-frequency edges, alias-faded at grazing angles
+          float wisp = fbm(q*4.5) * aaFade(q*4.5, 0.05, 0.2);
+          a = clamp(a + (wisp - 0.5) * 0.3 * a, 0.0, 1.0);
           float sun = dot(vWN, uSunDir);
           float day = smoothstep(-0.15, 0.35, sun);
           vec3 col = vec3(0.9,0.93,0.97) * (0.06 + day*1.15);
@@ -137,8 +174,9 @@ export class World {
         }`,
     });
     this.cloudMat = cloudMat;
-    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R + 9, 96, 60), cloudMat);
+    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R + 14, 96, 60), cloudMat);
     this.clouds.rotation.z = 0.12;
+    this.clouds.renderOrder = 2;
     this.scene.add(this.clouds);
 
     // ---- atmosphere rim (backside additive)
@@ -164,6 +202,7 @@ export class World {
         }`,
     });
     this.atmosphere = new THREE.Mesh(new THREE.SphereGeometry(PLANET_R + 70, 64, 40), atmoMat);
+    this.atmosphere.renderOrder = 3;
     this.scene.add(this.atmosphere);
   }
 

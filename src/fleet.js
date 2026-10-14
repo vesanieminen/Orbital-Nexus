@@ -196,8 +196,11 @@ export class Fleet {
   _portQueuePos(s, out) {
     const p = this.station.portWorld(s.port, out);
     const n = this.station.portNormalWorld(s.port, this._tmpN || (this._tmpN = new THREE.Vector3()));
-    const base = s.cls === 'capital' ? 260 : 80;
-    const step = s.cls === 'capital' ? 60 : 30;
+    // spacing must exceed the pair separation radius, or queued ships shove
+    // each other out of formation and wander (freighter sep 34 → pair 68)
+    const cap = s.cls === 'capital';
+    const base = cap ? 300 : (s.cls === 'freighter' ? 100 : 80);
+    const step = cap ? 100 : (s.cls === 'freighter' ? 70 : 36);
     return out.addScaledVector(n, base + s.queueSlot * step);
   }
 
@@ -226,8 +229,17 @@ export class Fleet {
         const d2 = a.pos.distanceToSquared(b.pos);
         if (d2 < r * r && d2 > 0.01) {
           const d = Math.sqrt(d2);
-          tmpA.subVectors(a.pos, b.pos).multiplyScalar((1 - d / r) * 14 * dt / d);
-          a.pos.add(tmpA); b.pos.sub(tmpA);
+          // parked ships hold station; queued ships hold formation — hard
+          // pushes there are what made ships circle each other aimlessly
+          const pa = a.state === 'DOCKED' || a.state === 'DOCK';
+          const pb = b.state === 'DOCKED' || b.state === 'DOCK';
+          if (pa && pb) continue;
+          const qa = pa || a.state === 'APPROACH';
+          const qb = pb || b.state === 'APPROACH';
+          const k = (qa && qb) ? 2.5 : 14;
+          tmpA.subVectors(a.pos, b.pos).multiplyScalar((1 - d / r) * k * dt / d);
+          if (!pa) a.pos.add(tmpA);
+          if (!pb) b.pos.sub(tmpA);
         }
       }
     }
@@ -246,16 +258,20 @@ export class Fleet {
     // visuals
     for (const s of this.ships) {
       s.visual.group.position.copy(s.pos);
-      // orientation
-      if (s.vel.lengthSq() > 0.02 || s.state === 'DOCK' || s.state === 'DOCKED') {
-        const look = s.state === 'DOCK' || s.state === 'DOCKED' ? s._dockFwd || s.vel : s.vel;
-        if (look.lengthSq() > 1e-6) {
-          this._dummy.position.set(0, 0, 0);
-          this._dummy.up.set(0, 1, 0);
-          tmpA.copy(look).normalize();
-          this._dummy.lookAt(tmpA);
-          s.visual.group.quaternion.slerp(this._dummy.quaternion, damp(s.cls === 'capital' ? 1.2 : 4.5, dt));
-        }
+      // orientation: face velocity, but queued/docking ships face the port so
+      // they hold a stable attitude instead of yawing on near-zero velocity noise
+      let look = null;
+      if (s.state === 'DOCK' || s.state === 'DOCKED') look = s._dockFwd || s.vel;
+      else if (s.state === 'APPROACH' && s.vel.lengthSq() < 120 && s.port >= 0) {
+        look = this._face || (this._face = new THREE.Vector3());
+        this.station.portNormalWorld(s.port, look).multiplyScalar(-1);
+      } else if (s.vel.lengthSq() > 0.02) look = s.vel;
+      if (look && look.lengthSq() > 1e-6) {
+        this._dummy.position.set(0, 0, 0);
+        this._dummy.up.set(0, 1, 0);
+        tmpA.copy(look).normalize();
+        this._dummy.lookAt(tmpA);
+        s.visual.group.quaternion.slerp(this._dummy.quaternion, damp(s.cls === 'capital' ? 1.2 : 4.5, dt));
       }
       s.visual.setThrottle(s.throttle);
       s.visual.update(dt, this.time, camPos, quality);
@@ -337,7 +353,9 @@ export class Fleet {
         this._portQueuePos(s, qp);
         this._seek(s, qp, dt, tmpA, tmpB, 1.0);
         s.taskLabel = p.occupant ? 'Queued for docking' : 'Final approach';
-        if (s.pos.distanceTo(qp) < 26 && !p.occupant) {
+        const qd = s.pos.distanceTo(qp);
+        if (qd < 60) s.vel.multiplyScalar(1 - damp(1.4, dt)); // settle into station-keeping
+        if (qd < 26 && !p.occupant) {
           s.state = 'DOCK';
           p.occupant = s.id;
           p.queue = p.queue.filter(id => id !== s.id);
@@ -661,12 +679,34 @@ export class Fleet {
   }
 
   _buildRouteOverlay() {
-    const mat = new THREE.LineBasicMaterial({ color: 0x2a6a9a, transparent: true, opacity: 0.35 });
+    const mat = new THREE.LineBasicMaterial({ color: 0x3f8ac6, transparent: true, opacity: 0.5 });
     const g = new THREE.BufferGeometry();
     const pts = [];
     const push = (a, b) => { pts.push(a.x, a.y, a.z, b.x, b.y, b.z); };
-    for (const jp of JUMPS) for (const gt of this.gates) push(jp.pos, gt);
-    for (const loop of this.courierLoops) for (let i = 0; i < loop.length; i++) push(loop[i], loop[(i + 1) % loop.length]);
+    // lanes that would clip the planet are bent into arcs that clear it
+    const tmpAB = new THREE.Vector3(), tmpP = new THREE.Vector3();
+    const clearance = (a, b) => {
+      tmpAB.subVectors(b, a);
+      const t = clamp(-a.dot(tmpAB) / Math.max(tmpAB.lengthSq(), 1e-6), 0, 1);
+      return tmpP.copy(a).addScaledVector(tmpAB, t).length();
+    };
+    const arc = (a, b, segs = 22) => {
+      const mid = tmpP.addVectors(a, b).multiplyScalar(0.5).clone();
+      const ctrl = mid.length() < PLANET_R + 420 ? mid.setLength(PLANET_R + 420) : mid;
+      let prev = a;
+      for (let i = 1; i <= segs; i++) {
+        const t = i / segs, it = 1 - t;
+        tmpAB.set(
+          it * it * a.x + 2 * it * t * ctrl.x + t * t * b.x,
+          it * it * a.y + 2 * it * t * ctrl.y + t * t * b.y,
+          it * it * a.z + 2 * it * t * ctrl.z + t * t * b.z);
+        push(prev, tmpAB);
+        prev = tmpAB.clone();
+      }
+    };
+    const lane = (a, b) => { clearance(a, b) < PLANET_R + 160 ? arc(a, b) : push(a, b); };
+    for (const jp of JUMPS) for (const gt of this.gates) lane(jp.pos, gt);
+    for (const loop of this.courierLoops) for (let i = 0; i < loop.length; i++) lane(loop[i], loop[(i + 1) % loop.length]);
     for (const loop of this.patrolLoops) for (let i = 0; i < loop.length; i++) push(loop[i], loop[(i + 1) % loop.length]);
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.routeLines = new THREE.LineSegments(g, mat);

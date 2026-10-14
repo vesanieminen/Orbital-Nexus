@@ -7,8 +7,10 @@ import { PALETTE, mergeGeos, rand, glowTexture, clamp } from './config.js';
 const hullMats = {};
 function hullMat(cls) {
   if (!hullMats[cls]) {
-    const base = { roughness: 0.55, metalness: 0.85 };
-    const colors = { freighter: 0x23272e, courier: 0x2a2f37, miner: 0x302e28, patrol: 0x333942, drone: 0x3c424b, capital: 0x1d2026, unknown: 0x15171b };
+    // lighter hulls + low metalness + faint emissive floor so ships read
+    // as silhouettes against deep space instead of vanishing into it
+    const base = { roughness: 0.5, metalness: 0.6, emissive: 0x0b1018, emissiveIntensity: 1 };
+    const colors = { freighter: 0x3d444e, courier: 0x464d57, miner: 0x4f4a3e, patrol: 0x505862, drone: 0x565e68, capital: 0x343a43, unknown: 0x24282e };
     hullMats[cls] = new THREE.MeshStandardMaterial({ color: colors[cls] ?? 0x343a44, ...base });
   }
   return hullMats[cls];
@@ -55,8 +57,17 @@ function defFreighter() {
   p.push((() => { const g = new THREE.BoxGeometry(13, 9, 6); g.translate(0, 0, -23); return g; })());
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(4.5, 6.5, 11); g.translate(s * 7.6, 0, 4); p.push(g); }
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(1, 7, 9); g.translate(s * 6, 5, -19); p.push(g); }
+  // hull ribs breaking up the spine
+  for (let i = 0; i < 4; i++) { const g = new THREE.BoxGeometry(10.8, 9.8, 1.2); g.translate(0, 0, -14 + i * 9); p.push(g); }
+  // stacked cargo containers on the dorsum
+  for (let i = 0; i < 4; i++) for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(3.6, 2.6, 7); g.translate(s * 3.2, 6.2, -14 + i * 8); p.push(g); }
+  // keel beam joining the engine nacelles + nose antenna
+  p.push((() => { const g = new THREE.BoxGeometry(17, 1.6, 3); g.translate(0, -3.5, 4); return g; })());
+  p.push((() => { const g = new THREE.CylinderGeometry(0.25, 0.25, 6, 4); g.rotateX(Math.PI / 2); g.translate(0, 2, 30); return g; })());
   const w = [];
   for (let i = 0; i < 5; i++) { const g = new THREE.BoxGeometry(3.4, 0.5, 1.1); g.translate(0, 4.6, 6 + i * 3.4); w.push(g); }
+  w.push((() => { const g = new THREE.BoxGeometry(5, 1.2, 0.6); g.translate(0, 1.5, 28.6); return g; })());
+  for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(0.4, 0.5, 22); g.translate(s * 5.1, 3.5, -2); w.push(g); }
   return {
     hull: mergeGeos(p), wins: mergeGeos(w), len: 52,
     engines: [{ x: -4.5, y: 0, z: -26.5, r: 2.3 }, { x: 4.5, y: 0, z: -26.5, r: 2.3 }],
@@ -69,7 +80,12 @@ function defCourier() {
   const nose = new THREE.ConeGeometry(1.7, 5, 10); nose.rotateX(Math.PI / 2); nose.translate(0, 0, 7.5); p.push(nose);
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(5.5, 0.5, 4); g.translate(s * 3.6, 0, -1); g.rotateY(s * -0.35); p.push(g); }
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(0.5, 2.6, 2.6); g.translate(s * 6.1, 1, -2); p.push(g); }
-  const w = [(() => { const g = new THREE.BoxGeometry(1.3, 0.7, 1.6); g.translate(0, 1.1, 4.2); return g; })()];
+  // canopy, dorsal fin, underwing pods
+  p.push((() => { const g = new THREE.SphereGeometry(1.5, 8, 6); g.scale(1, 0.7, 1.4); g.translate(0, 1.4, 3.5); return g; })());
+  p.push((() => { const g = new THREE.BoxGeometry(0.4, 2.2, 2.6); g.translate(0, 2.2, -4.5); return g; })());
+  for (const s of [-1, 1]) { const g = new THREE.CylinderGeometry(0.7, 0.7, 2.4, 8); g.rotateX(Math.PI / 2); g.translate(s * 6.1, 1, -3.6); p.push(g); }
+  const w = [(() => { const g = new THREE.BoxGeometry(1.3, 0.7, 1.6); g.translate(0, 1.1, 4.2); return g; })(),
+             (() => { const g = new THREE.BoxGeometry(1.6, 0.5, 2.4); g.translate(0, 2.2, 3.4); return g; })()];
   return {
     hull: mergeGeos(p), wins: mergeGeos(w), len: 15,
     engines: [{ x: -1.6, y: 0, z: -6.5, r: 1.0 }, { x: 1.6, y: 0, z: -6.5, r: 1.0 }],
@@ -83,8 +99,13 @@ function defMiner() {
   const arm = new THREE.CylinderGeometry(0.8, 0.5, 9, 8); arm.rotateX(Math.PI / 2); arm.translate(0, -1.5, 11); p.push(arm);
   const tip = new THREE.ConeGeometry(0.9, 2.4, 8); tip.rotateX(Math.PI / 2); tip.translate(0, -1.5, 16.5); p.push(tip);
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(1, 4, 6); g.translate(s * 4.8, 2, -4); p.push(g); }
+  // ore bins flanking the hopper, mast, drill guard ring
+  for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(2.6, 3, 5); g.translate(s * 4.6, -2.5, -9.5); p.push(g); }
+  p.push((() => { const g = new THREE.CylinderGeometry(0.3, 0.3, 5, 4); g.translate(0, 5.5, -6); return g; })());
+  p.push((() => { const g = new THREE.TorusGeometry(1.6, 0.3, 6, 12); g.translate(0, -1.5, 14.5); return g; })());
   const w = [(() => { const g = new THREE.BoxGeometry(4, 0.5, 1); g.translate(0, 3.6, 3); return g; })(),
-             (() => { const g = new THREE.BoxGeometry(1, 1, 0.6); g.translate(0, 2, 7.1); return g; })()];
+             (() => { const g = new THREE.BoxGeometry(1, 1, 0.6); g.translate(0, 2, 7.1); return g; })(),
+             (() => { const g = new THREE.BoxGeometry(0.6, 0.6, 0.6); g.translate(0, 8.1, -6); return g; })()];
   return {
     hull: mergeGeos(p), wins: mergeGeos(w), len: 28,
     engines: [{ x: -3.4, y: 1, z: -12.5, r: 1.5 }, { x: 3.4, y: 1, z: -12.5, r: 1.5 }],
@@ -97,6 +118,10 @@ function defPatrol() {
   const mid = new THREE.CylinderGeometry(1.9, 1.5, 6, 8); mid.rotateX(Math.PI / 2); mid.translate(0, 0, -3); p.push(mid);
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(6, 0.4, 3.4); g.translate(s * 3.8, 0, -2); g.rotateY(s * -0.5); p.push(g); }
   for (const s of [-1, 1]) { const g = new THREE.CylinderGeometry(1.1, 1.1, 4, 8); g.rotateX(Math.PI / 2); g.translate(s * 2.2, 0, -6.5); p.push(g); }
+  // dorsal fin, wingtip sensor pods, mast
+  p.push((() => { const g = new THREE.BoxGeometry(0.4, 2.4, 2.4); g.translate(0, 2.2, -3); return g; })());
+  for (const s of [-1, 1]) { const g = new THREE.CylinderGeometry(0.5, 0.5, 3, 6); g.rotateX(Math.PI / 2); g.translate(s * 6.6, 0, -2.5); p.push(g); }
+  p.push((() => { const g = new THREE.CylinderGeometry(0.15, 0.15, 3, 4); g.translate(0, 2.8, 1.5); return g; })());
   const w = [(() => { const g = new THREE.BoxGeometry(1.1, 0.6, 1.2); g.translate(0, 1.4, 3.5); return g; })()];
   return {
     hull: mergeGeos(p), wins: mergeGeos(w), len: 16,
@@ -109,6 +134,8 @@ function defDrone() {
   p.push(new THREE.BoxGeometry(1.7, 1.3, 2.8));
   const arm = new THREE.BoxGeometry(4, 0.3, 0.3); p.push(arm);
   const dish = new THREE.CylinderGeometry(0.7, 0.7, 0.2, 8); dish.translate(0, 0.9, 0.4); p.push(dish);
+  for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(0.3, 1.2, 0.3); g.translate(s * 2, -0.8, 0); p.push(g); }
+  p.push((() => { const g = new THREE.BoxGeometry(0.8, 0.5, 1.2); g.translate(0, -0.3, 1.8); return g; })());
   const w = [(() => { const g = new THREE.BoxGeometry(0.6, 0.4, 0.3); g.translate(0, 0.2, 1.45); return g; })()];
   return {
     hull: mergeGeos(p), wins: mergeGeos(w), len: 4,
@@ -124,11 +151,20 @@ function defCapital() {
   const tower = new THREE.BoxGeometry(6, 6, 10); tower.translate(0, 21, 40); p.push(tower);
   for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(4, 10, 30); g.translate(s * 14, -2, -30); p.push(g); }
   for (const s of [-1, 1]) for (const z of [-52, -34]) { const g = new THREE.CylinderGeometry(4.5, 4.5, 12, 10); g.rotateX(Math.PI / 2); g.translate(s * 8, -4, z - 6); p.push(g); }
+  // aft fins, bow sensor array, dorsal greeble strips
+  for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(1.6, 14, 22); g.translate(s * 11.8, 6, -55); g.rotateZ(s * 0.25); p.push(g); }
+  p.push((() => { const g = new THREE.BoxGeometry(3, 3, 3); g.translate(0, 0, 86); return g; })());
+  for (let i = 0; i < 6; i++) { const g = new THREE.BoxGeometry(23.5, 2, 4); g.translate(0, 8.5, -40 + i * 14); p.push(g); }
   const w = [];
   for (let i = 0; i < 14; i++) for (const s of [-1, 1]) {
     const g = new THREE.BoxGeometry(0.6, 1.2, 2.2); g.translate(s * 11.2, 3, -40 + i * 6); w.push(g);
   }
+  for (let i = 0; i < 14; i++) for (const s of [-1, 1]) {
+    const g = new THREE.BoxGeometry(0.6, 1.2, 2.2); g.translate(s * 11.2, -2, -40 + i * 6); w.push(g);
+  }
   for (let i = 0; i < 6; i++) { const g = new THREE.BoxGeometry(8, 0.6, 1.6); g.translate(0, 17.6, 26 + i * 3.4); w.push(g); }
+  // hangar bay glow on both flanks
+  for (const s of [-1, 1]) { const g = new THREE.BoxGeometry(0.8, 8, 26); g.translate(s * 11.6, -6, 10); w.push(g); }
   return {
     hull: mergeGeos(p), wins: mergeGeos(w), len: 150,
     engines: [
@@ -258,13 +294,13 @@ export class ShipVisual {
       this.group.add(plume); this.plumes.push({ mesh: plume, pm, r: e.r });
     }
 
-    // nav lights (blink)
-    this.nav = [];
+    // nav lights (soft blink, never fully dark)
+    this.nav = []; this._navBase = [];
     if (cls !== 'unknown') {
       const mk = (x, z, color) => {
         const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(color), color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
         s.position.set(x, 0.5, z); s.scale.setScalar(def.len * 0.07 + 1.0);
-        this.group.add(s); this.nav.push(s);
+        this.group.add(s); this.nav.push(s); this._navBase.push(def.len * 0.07 + 1.0);
       };
       mk(-def.len * 0.16, def.len * 0.3, 0xff4455);
       mk(def.len * 0.16, def.len * 0.3, 0x44ff88);
@@ -315,14 +351,19 @@ export class ShipVisual {
       const s = (0.5 + thr * 0.9) * pulse;
       c.mesh.scale.setScalar(Math.max(0.15, s));
     }
-    // nav blink
+    const d2 = this.group.position.distanceToSquared(camPos);
+    // nav lights: soft blink + distance compensation so ships stay visible at range
     if (this.nav.length) {
-      const on = Math.sin(time * 2.2 + this.group.id) > 0.1;
-      for (const s of this.nav) s.visible = on;
+      const blink = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 2.2 + this.group.id));
+      const ds = clamp(Math.sqrt(d2) / 280, 1, 7);
+      for (let i = 0; i < this.nav.length; i++) {
+        const s = this.nav[i];
+        s.material.opacity = blink;
+        s.scale.setScalar(this._navBase[i] * ds);
+      }
     }
     if (this.beamMat) this.beamMat.uniforms.uTime.value = this._time;
     // trail LOD: skip update when far
-    const d2 = this.group.position.distanceToSquared(camPos);
     const far = d2 > 900 * 900;
     this.trail.mesh.visible = !far || quality.trailsFar;
     if (this.trail.mesh.visible) this.trail.update(camPos);
