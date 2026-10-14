@@ -118,12 +118,22 @@ export class World {
           float spec = pow(max(dot(vWN,H),0.0), 90.0) * (1.0-land) * day;
           col += vec3(0.9,0.85,0.7) * spec * 0.8;
 
-          // night city lights (alias-faded so specks don't pop between frames)
-          float pop = fbm(sp*34.0 + 7.0);
+          // night city lights — clustered near coasts, off the ice and the
+          // high peaks. The twinkle phase comes from LOW-frequency noise so
+          // neighbouring pixels brighten together; a per-pixel phase used to
+          // re-randomise the pattern every frame (the "blinking" artifact).
+          float pop  = fbm(sp*24.0 + 7.0);
+          float pop2 = fbm(sp*48.0 + 7.0);
           float coast = 1.0 - smoothstep(0.50, 0.62, h);
-          float cities = land * (1.0-ice) * pow(smoothstep(0.60, 0.75, pop), 2.0) * (0.35 + 0.65*coast);
-          float flick = 0.9 + 0.1*sin(uTime*2.0 + pop*90.0);
-          col += vec3(1.0, 0.62, 0.25) * cities * flick * (1.0-day) * 0.45 * aaFade(sp*34.0, 0.03, 0.12);
+          float habit = 1.0 - smoothstep(0.60, 0.72, h);
+          float cityMask = land * (1.0-ice) * habit * (0.35 + 0.65*coast);
+          float metro = smoothstep(0.63, 0.75, pop);
+          float speck = smoothstep(0.58, 0.74, pop2) * aaFade(sp*48.0, 0.03, 0.12);
+          float cities = cityMask * (metro*0.55 + speck*0.65 + metro*speck*0.7);
+          float flick = 0.95 + 0.05*sin(uTime*1.6 + fbm(sp*2.5)*30.0);
+          col += vec3(1.0, 0.72, 0.38) * cities * flick * (1.0-day) * 0.9;
+          // soft halo confined to cluster cores, so metros glow without smearing
+          col += vec3(0.8, 0.5, 0.25) * metro * metro * cityMask * (1.0-day) * 0.08;
 
           // terminator warm band
           float band = smoothstep(0.0,0.18,sun) * (1.0-smoothstep(0.18,0.45,sun));
@@ -387,6 +397,42 @@ export class World {
 
   siteWorld(i, out) {
     return out.copy(this.miningSites[i]).applyMatrix4(this.beltGroup.matrixWorld);
+  }
+
+  // Procedural sky environment for PBR reflections: without an environment,
+  // metalness reads as flat black — this is what makes hulls read as lit metal.
+  // Small equirect canvas (sun hotspot at the real sun direction, cool planet
+  // glow in the lower hemisphere, faint nebula smears) baked through PMREM.
+  applyEnvironment(renderer) {
+    const W = 512, H = 256;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    x.fillStyle = '#0a121c'; x.fillRect(0, 0, W, H);
+    const rng = makeRng(77);
+    for (let i = 0; i < 14; i++) {
+      const px = rng() * W, py = rng() * H, r = 40 + rng() * 130;
+      const g = x.createRadialGradient(px, py, 0, px, py, r);
+      const hue = rng() < 0.5 ? '122,63,208' : '47,111,168';
+      g.addColorStop(0, `rgba(${hue},0.10)`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = g; x.fillRect(px - r, py - r, r * 2, r * 2);
+    }
+    const d = SUN_DIR;
+    const u = Math.atan2(d.z, d.x) / (Math.PI * 2) + 0.5;
+    const v = Math.asin(Math.min(1, Math.max(-1, d.y))) / Math.PI + 0.5;
+    const sx = u * W, sy = (1 - v) * H;
+    const sg = x.createRadialGradient(sx, sy, 0, sx, sy, 70);
+    sg.addColorStop(0, 'rgba(255,244,224,1)'); sg.addColorStop(0.25, 'rgba(255,210,150,0.55)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = sg; x.fillRect(sx - 70, sy - 70, 140, 140);
+    const pg = x.createLinearGradient(0, H * 0.45, 0, H);
+    pg.addColorStop(0, 'rgba(20,50,80,0)'); pg.addColorStop(1, 'rgba(55,110,155,0.7)');
+    x.fillStyle = pg; x.fillRect(0, H * 0.45, W, H * 0.55);
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromEquirectangular(tex);
+    this.scene.environment = env.texture;
+    tex.dispose(); pmrem.dispose();
   }
 
   update(dt, camera) {
