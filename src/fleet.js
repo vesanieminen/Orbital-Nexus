@@ -116,28 +116,111 @@ export class Fleet {
     } else if (opts.at) {
       s.pos.copy(opts.at);
       s.visual.trail.reset(s.pos);
+    } else if (midMission) {
+      this._placeMidMission(s);
     } else {
-      // start at a jump point (or mid-route if midMission)
       const jp = pick(JUMPS);
       s.pos.copy(jp.pos).add(new THREE.Vector3(rand(-80, 80), rand(-40, 40), rand(-80, 80)));
       s.visual.trail.reset(s.pos);
-      if (midMission && Math.random() < 0.65) {
-        // already en route: place along the lane toward the station
-        const t = rand(0.25, 0.8);
-        const gate = pick(this.gates);
-        s.pos.lerpVectors(jp.pos, gate, t);
-        s.route = [gate];
-        s.destLabel = 'Kepler Station';
-        this._assignDock(s);
-      } else {
-        this.fx.jumpFX(s.pos, cls === 'capital' ? 90 : 34);
-        s.state = 'JUMP_IN'; s.timer = 1.1;
-        s.destLabel = 'Kepler Station';
-      }
+      this.fx.jumpFX(s.pos, cls === 'capital' ? 90 : 34);
+      s.state = 'JUMP_IN'; s.timer = 1.1;
+      s.destLabel = 'Kepler Station';
     }
     visual.group.position.copy(s.pos);
-    this._initRole(s);
+    if (!midMission) this._initRole(s);
     return s;
+  }
+
+  // Scatter the initial fleet across the whole mission lifecycle. Dropping
+  // everyone onto the inbound lane at once made the opening minutes a conga
+  // line arriving at the station together.
+  _placeMidMission(s) {
+    const jp = pick(JUMPS);
+    const gate = pick(this.gates);
+    const roll = Math.random();
+
+    if (s.cls === 'courier') {
+      // mid-run on a courier loop leg
+      this._setCourierLoop(s);
+      const leg = randInt(0, s.route.length - 1);
+      s.pos.lerpVectors(s.route[leg], s.route[(leg + 1) % s.route.length], rand(0.15, 0.85));
+      s.routeIdx = (leg + 1) % s.route.length;
+      if (roll < 0.25) { s.state = 'HOLD'; s.timer = rand(0.5, 2); s.taskLabel = 'Waypoint hold'; }
+    } else if (s.cls === 'patrol') {
+      // on patrol orbit
+      s.route = this.patrolLoops[s.loop = randInt(0, this.patrolLoops.length - 1)];
+      s.routeIdx = randInt(0, s.route.length - 1);
+      s.pos.copy(s.route[s.routeIdx]).add(new THREE.Vector3(rand(-60, 60), rand(-30, 30), rand(-60, 60)));
+      s.destLabel = 'Patrol orbit'; s.taskLabel = 'Patrol sweep';
+    } else if (s.cls === 'miner') {
+      s.site = randInt(0, this.world.miningSites.length - 1);
+      if (roll < 0.45) {
+        // actively mining at a site
+        this.world.siteWorld(s.site, s.pos);
+        s.pos.add(new THREE.Vector3(rand(-50, 50), rand(-30, 30), rand(-50, 50)));
+        s.state = 'MINING'; s.timer = rand(4, 24);
+        s.destLabel = `Asteroid Site ${s.site + 1}`;
+        s.taskLabel = 'Mining operation — cutting beam active';
+        if (s.visual.beam) s.visual.beam.visible = true;
+        if (s.visual.beamMat) s.visual.beamMat.uniforms.uOn.value = 1;
+      } else if (roll < 0.65) {
+        // unloading ore at the processing facility
+        this.station.processPortWorld(s.pos);
+        s.pos.add(new THREE.Vector3(rand(-30, 30), rand(-20, 20), rand(-30, 30)));
+        s.state = 'UNLOAD'; s.timer = rand(2, 14);
+        s.destLabel = 'Ore Processing'; s.taskLabel = 'Transferring ore';
+      } else {
+        // in transit somewhere out in the belt
+        const other = randInt(0, this.world.miningSites.length - 1);
+        this.world.siteWorld(other, s.pos);
+        s.pos.add(new THREE.Vector3(rand(-350, 350), rand(-120, 120), rand(-350, 350)));
+        s.state = 'TO_SITE';
+        s.destLabel = `Asteroid Site ${s.site + 1}`;
+        s.taskLabel = 'Transit to asteroid site';
+      }
+    } else if (roll < 0.4) {
+      // inbound, spread along the full length of the lane
+      s.pos.lerpVectors(jp.pos, gate, rand(0.05, 0.9));
+      s.pos.add(new THREE.Vector3(rand(-60, 60), rand(-30, 30), rand(-60, 60)));
+      s.route = [gate];
+      s.destLabel = 'Kepler Station';
+      this._assignDock(s);
+    } else if (roll < 0.6) {
+      // outbound departure burn
+      s.pos.lerpVectors(gate, jp.pos, rand(0.1, 0.8));
+      s.route = [jp.pos];
+      s.state = 'DEPART'; s.timer = rand(3, 8);
+      s.destLabel = jp.name; s.taskLabel = 'Departure burn';
+    } else if (roll < 0.75 && this._parkAtPort(s)) {
+      // parked at a dock, partway through cargo transfer
+    } else {
+      // holding short of the gate, waiting for a dock slot
+      s.pos.lerpVectors(jp.pos, gate, rand(0.5, 0.9));
+      s.route = [gate];
+      s.state = 'HOLD'; s.timer = rand(2, 14);
+      s.destLabel = 'Kepler Station'; s.taskLabel = 'Holding for dock slot';
+    }
+    s.visual.trail.reset(s.pos);
+  }
+
+  // park a midMission ship at a free berth, mid-transfer
+  _parkAtPort(s) {
+    const capPort = this.ports.length - 1;
+    const free = this.ports.filter(p => !p.occupant && (s.cls === 'capital') === (p.i === capPort));
+    if (!free.length) return false;
+    const p = pick(free);
+    p.occupant = s.id;
+    s.port = p.i;
+    this.station.portWorld(p.i, s.pos);
+    const n = this.station.portNormalWorld(p.i, new THREE.Vector3());
+    s.pos.addScaledVector(n, s.cls === 'capital' ? 34 : 12);
+    s._dockFwd = n.multiplyScalar(-1);
+    s.state = 'DOCKED';
+    s.unloadTimer = s.cls === 'capital' ? rand(50, 70) : rand(16, 34);
+    s.timer = rand(0.3, 0.85) * s.unloadTimer;
+    s.destLabel = `Kepler Station · Dock ${p.i + 1}`;
+    s.taskLabel = 'Docked — cargo transfer';
+    return true;
   }
 
   _initRole(s) {
