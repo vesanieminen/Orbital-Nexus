@@ -79,18 +79,6 @@ export class Music {
   }
 
   // ------------------------------------------------------------- transport
-  // Start on by default: the AudioContext is created at load but browsers
-  // keep it suspended until the first user gesture — so we arm one-shot
-  // listeners and it begins playing the moment the user touches the page.
-  enableDefault() {
-    if (!this.ctx) this._init();
-    this.enabled = true;
-    this._startTransport();
-    const go = () => { if (this.enabled && this.ctx.state === 'suspended') this.ctx.resume(); };
-    window.addEventListener('pointerdown', go);
-    window.addEventListener('keydown', go);
-  }
-
   _startTransport() {
     const ctx = this.ctx;
     if (ctx.state === 'suspended') ctx.resume();

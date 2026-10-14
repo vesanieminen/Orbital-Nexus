@@ -37,8 +37,6 @@ const director = new Director(camera, station, fleet, world);
 const state = { paused: false, speed: 1, density: 55 };
 const music = new Music();
 const ui = new UI(canvas, director, fleet, state, music);
-music.enableDefault();
-document.getElementById('musicBtn').classList.add('active');
 
 // engine-light for followed / featured ships
 const shipLight = new THREE.PointLight(0x6fc4ff, 0, 420, 1.8);
