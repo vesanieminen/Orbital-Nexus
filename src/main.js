@@ -12,6 +12,7 @@ import { FX } from './ships.js';
 import { Fleet } from './fleet.js';
 import { Director } from './camera.js';
 import { UI } from './ui.js';
+import { Music } from './music.js';
 
 // ---------------------------------------------------------------- renderer
 const app = document.getElementById('app');
@@ -34,7 +35,8 @@ const fleet = new Fleet(scene, world, station, fx);
 const director = new Director(camera, station, fleet, world);
 
 const state = { paused: false, speed: 1, density: 55 };
-const ui = new UI(canvas, director, fleet, state);
+const music = new Music();
+const ui = new UI(canvas, director, fleet, state, music);
 
 // engine-light for followed / featured ships
 const shipLight = new THREE.PointLight(0x6fc4ff, 0, 420, 1.8);
@@ -96,7 +98,7 @@ function applyTier(t) {
   fx.setQuality(pr);
 }
 applyTier(2);
-window.__sim = { director, fleet, world, station, renderer, quality, state, ui, fx };
+window.__sim = { director, fleet, world, station, renderer, quality, state, ui, fx, music };
 
 // ---------------------------------------------------------------- resize
 addEventListener('resize', () => {

@@ -5,8 +5,8 @@ import { CLASS_LABEL } from './config.js';
 const $ = id => document.getElementById(id);
 
 export class UI {
-  constructor(canvas, director, fleet, state) {
-    this.canvas = canvas; this.director = director; this.fleet = fleet; this.state = state;
+  constructor(canvas, director, fleet, state, music) {
+    this.canvas = canvas; this.director = director; this.fleet = fleet; this.state = state; this.music = music;
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.selected = null;
@@ -33,6 +33,10 @@ export class UI {
       $('routesBtn').classList.toggle('active', this.fleet.routeLines.visible);
     });
     $('cineModeBtn').addEventListener('click', () => this.toggleCinema());
+    $('musicBtn').addEventListener('click', () => {
+      const on = this.music.toggle();
+      $('musicBtn').classList.toggle('active', on);
+    });
     $('resumeBtn').addEventListener('click', () => {
       this.director.resumeCinematic();
       $('resumeBtn').classList.remove('show');
@@ -77,6 +81,7 @@ export class UI {
           break;
         }
         case 'KeyR': $('routesBtn').click(); break;
+        case 'KeyM': $('musicBtn').click(); break;
         case 'KeyH': this.toggleCinema(); break;
         case 'KeyP': this.director.resumeCinematic(); $('resumeBtn').classList.remove('show'); break;
         case 'Escape': this.select(null); break;
