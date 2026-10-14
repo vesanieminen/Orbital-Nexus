@@ -29,6 +29,7 @@ const camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 1.5, 24
 
 // ---------------------------------------------------------------- world
 const world = new World(scene);
+world.applyEnvironment(renderer); // PBR reflections for hulls/station
 const station = new Station(scene);
 const fx = new FX(scene);
 const fleet = new Fleet(scene, world, station, fx);

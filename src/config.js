@@ -45,24 +45,33 @@ export function makeRng(seed) {
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
 }
 
-// merge non-indexed geometries (position/normal/uv) — avoids external addon dep
+// merge non-indexed geometries (position/normal/uv/color) — avoids external addon dep
 export function mergeGeos(geos) {
   const parts = geos.map(g => g.index ? g.toNonIndexed() : g);
-  let total = 0;
-  for (const g of parts) total += g.attributes.position.count;
+  let total = 0, hasColor = false;
+  for (const g of parts) {
+    total += g.attributes.position.count;
+    if (g.attributes.color) hasColor = true;
+  }
   const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), uv = new Float32Array(total * 2);
+  const col = hasColor ? new Float32Array(total * 3) : null;
   let o = 0;
   for (const g of parts) {
     const n = g.attributes.position.count;
     pos.set(g.attributes.position.array, o * 3);
     if (g.attributes.normal) nor.set(g.attributes.normal.array, o * 3);
     if (g.attributes.uv) uv.set(g.attributes.uv.array, o * 2);
+    if (col) {
+      if (g.attributes.color) col.set(g.attributes.color.array, o * 3);
+      else col.fill(1, o * 3, (o + n) * 3);
+    }
     o += n;
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return out;
 }
 
