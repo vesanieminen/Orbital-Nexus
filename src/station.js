@@ -80,7 +80,7 @@ export class Station {
       const up = i % 2 === 0;
       e.set(0, -a, 0);
       q.setFromEuler(e);
-      m.compose(new THREE.Vector3(Math.cos(a) * 62, up ? 5.2 : -5.2, Math.sin(a) * 62), q, new THREE.Vector3(1, 1, 1));
+      m.compose(new THREE.Vector3(Math.cos(a) * 62, up ? 6.9 : -6.9, Math.sin(a) * 62), q, new THREE.Vector3(1, 1, 1));
       wins.setMatrixAt(i, m);
     }
     wins.instanceMatrix.needsUpdate = true;
@@ -112,12 +112,33 @@ export class Station {
       this.group.add(gl);
       this.dockPorts.push({ pos, normal: dir.clone(), size: 1 });
     }
-    // capital berth: large port at spine base
-    const capPos = new THREE.Vector3(0, -78, 0);
+    // capital berth: large port at spine base — attached via a base module
+    // and struts so the glowing ring reads as part of the station, not debris
+    const capPos = new THREE.Vector3(0, -72, 0);
     const capNorm = new THREE.Vector3(0, -1, 0);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(14, 10, 14, 12), hullMat);
+    base.position.y = -62; this.group.add(base);
+    const baseRing = new THREE.Mesh(new THREE.TorusGeometry(14.5, 1.2, 6, 20), darkMat);
+    baseRing.rotation.x = Math.PI / 2; baseRing.position.y = -56; this.group.add(baseRing);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const from = new THREE.Vector3(Math.cos(a) * 8, -58, Math.sin(a) * 8);
+      const to = new THREE.Vector3(Math.cos(a) * 24, -72, Math.sin(a) * 24);
+      const dir = new THREE.Vector3().subVectors(to, from);
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, dir.length(), 6), darkMat);
+      strut.position.copy(from).addScaledVector(dir, 0.5);
+      strut.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+      this.group.add(strut);
+    }
     const frame = new THREE.Mesh(new THREE.TorusGeometry(26, 2, 8, 32), amberSoft);
     frame.rotation.x = Math.PI / 2; frame.position.copy(capPos);
     this.group.add(frame);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const gl = new THREE.Mesh(new THREE.SphereGeometry(1.1, 6, 6), amberMat);
+      gl.position.set(Math.cos(a) * 26, -72, Math.sin(a) * 26);
+      this.group.add(gl);
+    }
     this.dockPorts.push({ pos: capPos, normal: capNorm, size: 26 });
   }
 

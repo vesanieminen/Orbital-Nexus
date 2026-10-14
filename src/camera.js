@@ -233,7 +233,7 @@ export class Director {
 
   orbit(dTheta, dPhi) {
     this.takeManualControl();
-    this.mTheta -= dTheta;
+    this.mTheta += dTheta;   // drag right spins the scene right (grab-and-drag feel)
     this.mPhi = clamp(this.mPhi + dPhi, -1.35, 1.35);
   }
   zoom(factor) {
