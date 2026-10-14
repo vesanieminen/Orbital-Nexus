@@ -2,6 +2,8 @@
 
 **A visually spectacular, interactive 3D orbital space simulation that runs directly in your browser.**
 
+**▶ [Live demo](https://vesanieminen.github.io/Orbital-Nexus/)** — no install, just open and watch.
+
 No build step, no server-side code, no network required — open `index.html` and watch a living orbital traffic system unfold: a station above a cloud-wrapped planet, dozens of purposeful spacecraft, luminous engine plumes, and a cinematic camera that films it all.
 
 ![Orbital Nexus — Kepler Station with freighter traffic above the planet](assets/hero.png)
