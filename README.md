@@ -42,7 +42,7 @@ From the first second, a director films the scene: slow orbital sweeps, gentle d
 - **Pause**, **sim-speed** (0.25–4×), and **traffic-density** controls
 - Optional **route overlay** (hidden by default) reveals the jump-point traffic network
 - **Cinema mode** hides the UI for a clean, film-like view
-- **Music** (button or **M**) — a generative Vangelis/Blade-Runner-esque synth score, synthesized live and never repeating
+- **Music** — a generative Vangelis/Blade-Runner-esque synth score, synthesized live and never repeating; **on by default** (button or **M** to mute/unmute)
 
 ![Route overlay revealing the jump-point network around the station](assets/routes.png)
 

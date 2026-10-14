@@ -79,19 +79,40 @@ export class Music {
   }
 
   // ------------------------------------------------------------- transport
-  toggle() {
+  // Start on by default: the AudioContext is created at load but browsers
+  // keep it suspended until the first user gesture — so we arm one-shot
+  // listeners and it begins playing the moment the user touches the page.
+  enableDefault() {
     if (!this.ctx) this._init();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-    this.enabled = !this.enabled;
-    const t = this.ctx.currentTime;
+    this.enabled = true;
+    this._startTransport();
+    const go = () => { if (this.enabled && this.ctx.state === 'suspended') this.ctx.resume(); };
+    window.addEventListener('pointerdown', go);
+    window.addEventListener('keydown', go);
+  }
+
+  _startTransport() {
+    const ctx = this.ctx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const t = ctx.currentTime;
     const g = this.master.gain;
     g.cancelScheduledValues(t);
     g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(0.5, t + 4);          // slow, cinematic fade-in
+    this._nextChord = t + 1.2;
+    if (!this._timer) this._timer = setInterval(() => this._tick(), 400);
+  }
+
+  toggle() {
+    if (!this.ctx) this._init();
+    this.enabled = !this.enabled;
     if (this.enabled) {
-      g.linearRampToValueAtTime(0.5, t + 4);          // slow, cinematic fade-in
-      this._nextChord = t + 1.2;
-      if (!this._timer) this._timer = setInterval(() => this._tick(), 400);
+      this._startTransport();
     } else {
+      const t = this.ctx.currentTime;
+      const g = this.master.gain;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
       g.linearRampToValueAtTime(0, t + 2);
       clearInterval(this._timer); this._timer = null; // already-scheduled tails fade with the master
     }
